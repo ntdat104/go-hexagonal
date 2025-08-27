@@ -144,10 +144,9 @@ type FileConfig struct {
 
 // AppLogger wraps the zap logger
 type AppLogger struct {
-	zap            *zap.Logger
-	sugar          *zap.SugaredLogger
-	options        *Options
-	lumberjackHook func(zapcore.Entry) error
+	zap     *zap.Logger
+	sugar   *zap.SugaredLogger
+	options *Options
 }
 
 // ParseLogLevel converts a string log level to zapcore.Level
@@ -275,12 +274,11 @@ func New(opts ...Option) (*AppLogger, error) {
 
 // buildCores creates the logging output cores
 func (l *AppLogger) buildCores() []zapcore.Core {
-	encoderConfig := l.getEncoderConfig()
 	cores := make([]zapcore.Core, 0)
 
 	// Add console output
 	if l.options.EnableConsole {
-		consoleEncoder := zapcore.NewConsoleEncoder(encoderConfig)
+		consoleEncoder := zapcore.NewConsoleEncoder(l.getEncoderConfig())
 		consoleCore := zapcore.NewCore(
 			consoleEncoder,
 			zapcore.AddSync(os.Stdout),
@@ -291,20 +289,47 @@ func (l *AppLogger) buildCores() []zapcore.Core {
 
 	// Add file output
 	if l.options.EnableFile && l.options.FileConfig != nil {
-		fileEncoder := zapcore.NewConsoleEncoder(encoderConfig)
-
-		l.lumberjackHook = l.createLumberjackHook()
+		fileEncoder := zapcore.NewJSONEncoder(l.getJSONEncoderConfig())
 
 		// Create a core that doesn't write directly to file, we'll use the hook for actual file output
+		fc := l.options.FileConfig
+		lum := &lumberjack.Logger{
+			Filename:   filepath.Join(util.GetProjectRootPath(), fc.SavePath, fc.FileName), // fc.FileName
+			MaxSize:    fc.MaxSize,
+			MaxAge:     fc.MaxAge,
+			MaxBackups: fc.MaxBackups,
+			LocalTime:  fc.LocalTime,
+			Compress:   fc.Compress,
+		}
+
 		fileCore := zapcore.NewCore(
 			fileEncoder,
-			zapcore.AddSync(os.Stdout), // Temporary output to stdout, actual output handled by hook
+			zapcore.AddSync(lum), // Temporary output to stdout, actual output handled by hook
 			zap.NewAtomicLevelAt(l.options.Level),
 		)
 		cores = append(cores, fileCore)
 	}
 
 	return cores
+}
+
+// getJSONEncoderConfig gets the encoder configuration
+func (l *AppLogger) getJSONEncoderConfig() zapcore.EncoderConfig {
+	encoderConfig := zapcore.EncoderConfig{
+		TimeKey:        "time",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeName:     zapcore.FullNameEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+	}
+	return encoderConfig
 }
 
 // getEncoderConfig gets the encoder configuration
@@ -345,10 +370,6 @@ func (l *AppLogger) getEncoderConfig() zapcore.EncoderConfig {
 func (l *AppLogger) buildZapOptions() []zap.Option {
 	options := make([]zap.Option, 0)
 
-	if l.options.EnableFile && l.lumberjackHook != nil {
-		options = append(options, zap.Hooks(l.lumberjackHook))
-	}
-
 	if l.options.EnableCaller {
 		options = append(options, zap.AddCaller())
 	}
@@ -358,34 +379,6 @@ func (l *AppLogger) buildZapOptions() []zap.Option {
 	}
 
 	return options
-}
-
-// createLumberjackHook creates a lumberjack hook for file output
-func (l *AppLogger) createLumberjackHook() func(zapcore.Entry) error {
-	return func(e zapcore.Entry) error {
-		if !l.options.EnableFile || l.options.FileConfig == nil {
-			return nil
-		}
-
-		fc := l.options.FileConfig
-		lum := &lumberjack.Logger{
-			Filename:   filepath.Join(util.GetProjectRootPath(), fc.SavePath, fc.FileName),
-			MaxSize:    fc.MaxSize,
-			MaxAge:     fc.MaxAge,
-			MaxBackups: fc.MaxBackups,
-			LocalTime:  fc.LocalTime,
-			Compress:   fc.Compress,
-		}
-
-		format := "[%-32s]\t %s\t [%s]\t %s\n"
-		_, err := lum.Write([]byte(fmt.Sprintf(format,
-			e.Time.Format(time.RFC3339Nano),
-			e.Level.CapitalString(),
-			e.Caller.TrimmedPath(),
-			e.Message)),
-		)
-		return err
-	}
 }
 
 // Zap returns the wrapped zap logger
