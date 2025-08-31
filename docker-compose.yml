@@ -15,7 +15,7 @@ services:
       - mysql_data:/var/lib/mysql
 
   postgres:
-    image: postgres:15
+    image: postgres:16
     container_name: gohex-postgres
     restart: always
     environment:
@@ -28,17 +28,16 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   redis:
-    image: redis:7
+    image: redis:8
     container_name: gohex-redis
     restart: always
-    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
 
   mongo:
-    image: mongo:6
+    image: mongo:8
     container_name: gohex-mongo
     restart: always
     environment:
